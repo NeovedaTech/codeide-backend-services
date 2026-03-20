@@ -1,5 +1,6 @@
+import { config } from 'dotenv';
 import mongoose from 'mongoose';
-
+config()
 export async function connectDB() {
   if (mongoose.connection.readyState === 1) return;
 

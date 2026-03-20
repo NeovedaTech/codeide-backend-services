@@ -6,7 +6,7 @@ export const USER_JWT_SECRET = "FDSHHSDJDS";
 export const ADMIN_JWT_SECRET = "shgdsjdsjds";
 export const CALLBACK = ""
 export const EXECUTION_API = process.env.EXECUTION_API
-export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || "http://localhost:3000";
+export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || "http://localhost:3030";
 
 export const corsConfig = {
     origin:ALLOWED_ORIGINS,
@@ -31,10 +31,12 @@ export const db = () => {
     })
 }
 
+const isProd = process.env.NODE_ENV === "PROD";
+
 export const COOKIE_OPTIONS = {
     httpOnly: true,
-    secure: true,
-    sameSite: 'none',
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
     maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
