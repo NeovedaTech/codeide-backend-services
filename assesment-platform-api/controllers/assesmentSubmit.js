@@ -1,6 +1,7 @@
 import AssesmentSolution from "../models/Solution.js";
 import { addJobToMainQueue } from "../services/queueService.js";
-import axios from 'axios'
+import axios from 'axios';
+import redis from "../../config/redisconn.js";
 export const submitSection = async (req, res) => {
   try {
     const {
@@ -45,7 +46,8 @@ export const submitSection = async (req, res) => {
     //   ).codingAnswers = response;
     // }
 
-    if (userSolution.assesmentSnapshot.length - 1 == current) {
+    const isFinalSection = userSolution.assesmentSnapshot.length - 1 == current;
+    if (isFinalSection) {
       userSolution.isSubmitted = true;
     } else {
       userSolution.response[current + 1].startedAt = new Date();
@@ -53,6 +55,20 @@ export const submitSection = async (req, res) => {
     userSolution.currSection += 1;
 
     await userSolution.save();
+
+    // Clear question/problem pool cache for this assessment on final submission
+    // so the next test-taker gets a fresh randomisation from the DB.
+    if (isFinalSection) {
+      const aid = userSolution.assessmentId.toString();
+      const delPromises = userSolution.assesmentSnapshot.map((section) => {
+        const sid = section.sectionId;
+        return Promise.all([
+          redis.del(`test:${aid}:section:${sid}:questionPool`),
+          redis.del(`test:${aid}:section:${sid}:problemPool`),
+        ]);
+      });
+      await Promise.all(delPromises).catch(() => {}); // non-blocking — don't fail the response
+    }
     await addJobToMainQueue("submitSection", {
       solutionId,
       sectionId,

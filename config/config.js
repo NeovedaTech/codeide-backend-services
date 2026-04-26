@@ -6,10 +6,13 @@ export const USER_JWT_SECRET = "FDSHHSDJDS";
 export const ADMIN_JWT_SECRET = "shgdsjdsjds";
 export const CALLBACK = ""
 export const EXECUTION_API = process.env.EXECUTION_API
+console.log("Execution API URL:", EXECUTION_API);
+console.log("MongoDB URI:", process.env.MONGODB_URI);
+console.log("Allowed Origins:", process.env.ALLOWED_ORIGINS);
 export const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || "http://localhost:3030";
 
 export const corsConfig = {
-    origin:ALLOWED_ORIGINS,
+    origin: ALLOWED_ORIGINS,
     methods: ["GET", "POST", "PUT", "DELETE"],
     // allow headers
 
@@ -49,10 +52,18 @@ export const redisConnection = {
 
 
 export const config = {
-  port: process.env.PORT || 3000,
-  maxSessions: Number(process.env.MAX_SESSIONS) || 200,
-  sessionTimeout: Number(process.env.SESSION_TIMEOUT) || 1800000,
-  dockerImage: process.env.DOCKER_IMAGE || "ubuntu",
-  memoryLimit: process.env.MEMORY_LIMIT || "256m",
-  cpuLimit: process.env.CPU_LIMIT || "0.5"
+    port: process.env.PORT || 3000,
+    maxSessions: Number(process.env.MAX_SESSIONS) || 200,
+    sessionTimeout: Number(process.env.SESSION_TIMEOUT) || 1800000,
+    dockerImage: process.env.DOCKER_IMAGE || "ubuntu",
+    memoryLimit: process.env.MEMORY_LIMIT || "256m",
+    cpuLimit: process.env.CPU_LIMIT || "0.5",
+    aws: {
+        region: process.env.AWS_REGION,
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        bucket: process.env.S3_BUCKET_NAME,
+        putExpiry: Number(process.env.S3_PRESIGNED_URL_EXPIRY) || 300,
+        getExpiry: Number(process.env.S3_GET_URL_EXPIRY) || 3600,
+    },
 };

@@ -1,6 +1,5 @@
-// import AssesmentSolution from "../models/Solution";
-
 import AssesmentSolution from "../models/Solution.js";
+import Assesment from "../models/Assesment.js";
 
 // export const startAssessment = async (req, res) => {
 //   try {
@@ -62,9 +61,25 @@ async function startAssessment(req, res) {
 
     // Create the AssessmentSolution document
 
+    const assessment = await Assesment.findById(assessmentSolution.assessmentId)
+      .select("isProctored isAvEnabled");
+
+    const isProctored = assessment?.isProctored || false;
+    const isAvEnabled = assessment?.isAvEnabled || false;
+
     assessmentSolution.response = responses;
     assessmentSolution.hasAgreed = true;
-    // Save to database
+    assessmentSolution.proctoringData = {
+      isProctored,
+      isAvEnabled,
+      isEnabled:       isProctored || isAvEnabled,
+      recordingStatus: isAvEnabled ? "not_started" : "n/a",
+      sessionCount:    0,
+      lastKnownChunkIndex: -1,
+      violationCount:  0,
+      logs:   [],
+      chunks: [],
+    };
     await assessmentSolution.save();
 
     return res.status(200).json({

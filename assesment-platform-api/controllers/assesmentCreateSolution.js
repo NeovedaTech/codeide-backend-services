@@ -3,6 +3,7 @@ import Assesment from "../models/Assesment.js";
 import Problem from "../models/Problem.js";
 import { QuestionPool } from "../models/QuestionPool.js";
 import AssesmentSolution from "../models/Solution.js";
+import bcrypt from "bcrypt";
 
 const shuffleArray = (arr) => {
   let i = arr.length;
@@ -118,6 +119,10 @@ const createTestSnapshot = async (test) => {
       totalProblems: snapshot.problems?.length || 0,
     };
 
+    snapshot.isProctored     = test.isProctored;
+    snapshot.isAvEnabled     = test.isAvEnabled;
+    snapshot.passCodeEnabled = test.passCodeEnabled;
+
     return snapshot;
   });
 
@@ -145,11 +150,30 @@ export const getUserAssessmentSolution = async (req, res) => {
     });
 
     if (!testSolution) {
+      if (test.passCodeEnabled) {
+        const { passCode } = req.body;
+        if (!passCode) {
+          return res.status(403).json({ message: "Passcode required" });
+        }
+        const valid = await bcrypt.compare(passCode, test.passCode);
+        if (!valid) {
+          return res.status(403).json({ message: "Invalid passcode" });
+        }
+      }
+
       const assesmentSnapshot = await createTestSnapshot(test);
       testSolution = await AssesmentSolution.create({
         assessmentId,
         userId,
         assesmentSnapshot,
+        proctoringData: {
+          isProctored:          !!test.isProctored,
+          isAvEnabled:          !!test.isAvEnabled,
+          isScreenCapture:      !!test.isScreenCapture,
+          isEnabled:            false,
+          recordingStatus:      (test.isProctored || test.isAvEnabled) ? "not_started" : "n/a",
+          screenRecordingStatus: test.isScreenCapture ? "not_started" : "n/a",
+        },
       });
     }
     // console.log(test.userDetails);

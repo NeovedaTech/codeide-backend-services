@@ -31,11 +31,9 @@ const ProblemSchema = new mongoose.Schema(
         input: {
           type: mongoose.Schema.Types.Mixed,
           required: true,
-          trim: true,
         },
         output: {
           type: mongoose.Schema.Types.Mixed,
-          trim: true,
           required: true,
         },
         explanation: String,
@@ -77,17 +75,10 @@ const ProblemSchema = new mongoose.Schema(
     },
     languagesSupported: {
       type: [String],
-      enum: ["python", "cpp", "java", "c", "javascript"],
-      default: ["python", "cpp", "java", "c", "javascript"],
+      default: [],
     },
   },
   { timestamps: true },
 );
-
-// Optional: Automatically update `updatedAt`
-ProblemSchema.pre("save", function (next) {
-  this.updatedAt = Date.now();
-  next();
-});
 const Problem = mongoose.model("Problem", ProblemSchema);
 export default Problem;

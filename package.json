@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1037.0",
+    "@aws-sdk/s3-request-presigner": "^3.1037.0",
     "@sendgrid/mail": "^8.1.6",
     "axios": "^1.13.5",
     "bcrypt": "^6.0.0",
@@ -16,6 +18,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.1",
     "morgan": "^1.10.1",
+    "multer": "^2.1.1",
     "node-cron": "^4.2.1",
     "node-pty": "^1.1.0",
     "nodemailer": "^8.0.1",
@@ -41,7 +44,11 @@
     "seed:excel": "node ./assesment-platform-api/seeds/seedFromExcel.js",
     "seed:assessments": "node ./assesment-platform-api/seeds/seedAssessments.js",
     "seed:json": "node ./assesment-platform-api/seeds/seedFromJson.js",
-    "seed:mcq": "node ./assesment-platform-api/seeds/seedMcqAssessments.js"
+    "seed:mcq": "node ./assesment-platform-api/seeds/seedMcqAssessments.js",
+    "seed:problems": "node ./assesment-platform-api/seeds/seedProblems.js",
+    "seed:cs-os": "node ./assesment-platform-api/seeds/seedCsOsQuestions.js",
+    "seed:skills": "node ./assesment-platform-api/seeds/seedSkillAssessments.js",
+    "seed:multi": "node ./assesment-platform-api/seeds/seedMultiSectionAssessments.js"
   },
   "keywords": [],
   "author": "",

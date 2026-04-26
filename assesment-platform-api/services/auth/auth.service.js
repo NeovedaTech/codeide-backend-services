@@ -34,7 +34,7 @@ export const register = async ({ name, email, password, skillLevel }) => {
     assessmentId: "default",
   });
 
-  const token = signToken({ id: user._id, userId: user.userId, email: user.email });
+  const token = signToken({ id: user._id, userId: user.userId, email: user.email, role: user.role });
 
   return { token, user: sanitize(user) };
 };
@@ -60,7 +60,7 @@ export const login = async ({ email, password }) => {
     throw err;
   }
 
-  const token = signToken({ id: user._id, userId: user.userId, email: user.email });
+  const token = signToken({ id: user._id, userId: user.userId, email: user.email, role: user.role });
 
   return { token, user: sanitize(user) };
 };
@@ -88,6 +88,7 @@ const sanitize = (user) => ({
   userId: user.userId,
   name: user.name,
   email: user.email,
+  role: user.role,
   skillLevel: user.skillLevel,
   assessmentStatus: user.assessmentStatus,
   createdAt: user.createdAt,

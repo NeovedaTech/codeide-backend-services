@@ -12,12 +12,14 @@ import { setupMorgan } from "../config/morgan.js";
 import { initWebSocket } from "./services/webSocket.js";
 import "../config/redisconn.js";
 
-import assesmentRouter  from "./routes/assesmentRouter.js";
+import assesmentRouter    from "./routes/assesmentRouter.js";
 import codeExecutionRouter from "./routes/codeExecutionRoutes.js";
-import userRouter       from "./routes/userRouter.js";
-import testRouter       from "./routes/testRouter.js";
-import roleSkillRouter  from "./routes/role-skill/role-skill.routes.js";
-import authRouter       from "./routes/auth/auth.routes.js";
+import userRouter          from "./routes/userRouter.js";
+import testRouter          from "./routes/testRouter.js";
+import roleSkillRouter     from "./routes/role-skill/role-skill.routes.js";
+import authRouter          from "./routes/auth/auth.routes.js";
+import adminRouter         from "./routes/adminRoutes.js";
+import proctoringRouter    from "./routes/proctoringRoutes.js";
 
 dotenv.config();
 
@@ -60,6 +62,8 @@ app.use("/api/v1/code-execution", codeExecutionRouter);
 app.use("/api/v1/user",           userRouter);
 app.use("/api/v1/test",           testRouter);
 app.use("/api/v1/role-skill",     roleSkillRouter);
+app.use("/api/v1/admin",          adminRouter);
+app.use("/api/v1/proctoring",     proctoringRouter);
 
 // ── Rate limiter (after routes so health check is unthrottled) ────────────────
 app.use(generalRateLimiter);
