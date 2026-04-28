@@ -70,6 +70,52 @@ These are the assumed defaults for implementation unless product explicitly chan
 
 ---
 
+## Current CODE-IDE Notes After Latest Pull
+
+These notes reflect the currently pulled CODE-IDE repos and are important because the integration should be implemented on top of the newer structure, not the older file layout.
+
+### Frontend reality
+
+- auth state is still local and token-based in:
+  - `code-ide-ui/context/AuthContext.tsx`
+- the assessment UI has been modularized under:
+  - `code-ide-ui/modules/assesment/*`
+- the main assessment entry component now lives at:
+  - `code-ide-ui/modules/assesment/components/pages/AssesmentEntry.tsx`
+- the current assessment entry flow already includes:
+  - metadata fetch
+  - passcode gate
+  - device check
+  - AV permission/proctoring preflight
+
+### Backend reality
+
+- assessment routes already include:
+  - `GET /api/v1/assesments/info/:id`
+  - `POST /api/v1/assesments/verify-passcode`
+- proctoring infrastructure and routes already exist
+- the `Assesment` model already includes:
+  - `isProctored`
+  - `isAvEnabled`
+  - `isScreenCapture`
+  - `passCodeEnabled`
+  - `passCode`
+  - `isPublished`
+  - `isActive`
+- the `Solution` model already includes proctoring data, but not Knovia external-attempt metadata
+- the worker still calls `examEvaluator(job)` without `await`, which remains a blocking reliability issue for callback delivery
+
+### Practical implication
+
+The Knovia SSO integration should be layered into the existing assessment flow, not built as a parallel flow that skips:
+
+- passcode checks
+- assessment preflight
+- device checks
+- proctoring requirements configured on the assessment
+
+---
+
 ## System Overview
 
 ### High-level flow
@@ -355,6 +401,17 @@ File:
 
 - `codeide-backend-services/assesment-platform-api/models/Assesment.js`
 
+Current model already contains operational assessment flags:
+
+- `skillId`
+- `isProctored`
+- `isAvEnabled`
+- `isScreenCapture`
+- `passCodeEnabled`
+- `passCode`
+- `isPublished`
+- `isActive`
+
 Add field:
 
 ```js
@@ -369,6 +426,7 @@ level: {
 Rules:
 
 - for this integration, launch resolution uses `skillId + level=advanced`
+- SSO-launched attempts must still honor existing operational flags on the resolved assessment
 
 ### Solution model
 
@@ -572,11 +630,14 @@ Files to inspect/update:
 
 - `codeide-backend-services/assesment-platform-api/controllers/assesmentCreateSolution.js`
 - `codeide-backend-services/assesment-platform-api/controllers/assessmentStart.js`
+- `codeide-backend-services/assesment-platform-api/controllers/assessmentInfo.js`
+- `codeide-backend-services/assesment-platform-api/controllers/verifyPasscode.js`
 
 Change:
 
 - either reuse existing solution creation path through a service
 - or add a Knovia-specific creation path that writes external metadata fields
+- reuse the existing assessment metadata/passcode path where applicable instead of bypassing it
 
 ### 8. Evaluation callback
 
@@ -663,6 +724,9 @@ Responsibilities:
 - persist auth token
 - persist user
 - update in-memory auth state
+- align with the current localStorage keys already used by the frontend:
+  - `knovia_token`
+  - `knovia_user`
 
 ### 4. Direct launch route
 
@@ -679,12 +743,17 @@ Why:
 
 File:
 
-- `code-ide-ui/components/pages/AssesmentEntry.tsx`
+- `code-ide-ui/modules/assesment/components/pages/AssesmentEntry.tsx`
 
 Change:
 
 - support loading attempt by `solutionId`
 - do not depend only on `assessmentId` and `userId` query params
+- keep the existing assessment preflight behavior intact:
+  - assessment info fetch
+  - passcode verification
+  - device check
+  - AV readiness if enabled
 
 ### 6. Existing home flow
 
@@ -696,6 +765,21 @@ Change:
 
 - no required change for standard users
 - Knovia-launched users should bypass this route entirely
+
+### 7. Existing route constants
+
+File:
+
+- `code-ide-ui/constants/ApiRoutes.ts`
+
+Change:
+
+- add Knovia launch routes into the existing API route constant structure
+- keep naming consistent with:
+  - `AUTH_ROUTES`
+  - `ASSESMENT_ROUTES`
+  - `PROCTORING_ROUTES`
+  - `ADMIN_ROUTES`
 
 ---
 
@@ -829,6 +913,7 @@ Change:
 
 - solution preview/report access must be ownership-based or signed-link based
 - certificate access must be reviewed before external rollout
+- current public certificate-by-solutionId behavior should not be assumed acceptable for the final Knovia integration
 
 ---
 
@@ -980,16 +1065,21 @@ Minimum retry policy:
    - `User`
    - `Assesment`
    - `Solution`
-2. Add Knovia-side launch and callback endpoints.
-3. Add CODE-IDE launch endpoint and SSO service.
-4. Add CODE-IDE frontend SSO page and session bootstrap helper.
-5. Add solution-based launch route.
-6. Add evaluator callback sender.
-7. Add security fixes:
+2. Wire the integration into the current modular assessment flow:
+   - `modules/assesment/*`
+   - passcode flow
+   - device check
+   - AV readiness flow
+3. Add Knovia-side launch and callback endpoints.
+4. Add CODE-IDE launch endpoint and SSO service.
+5. Add CODE-IDE frontend SSO page and session bootstrap helper.
+6. Add solution-based launch route.
+7. Add evaluator callback sender.
+8. Add security fixes:
    - worker await
    - ownership checks
    - certificate/report access review
-8. Run end-to-end integration testing.
+9. Run end-to-end integration testing.
 
 ---
 
