@@ -33,6 +33,118 @@ This spec does not cover:
 
 ---
 
+## Knovia Codebase Context The Developer Should Assume
+
+This section exists because the implementing developer may not have seen the Knovia codebase at all.
+
+The points below are the distilled repo-scan findings from Knovia and should be treated as the working context for the integration. The developer should not need to rediscover these basics before starting.
+
+### Knovia product behavior today
+
+- each skill has three proficiency levels:
+  - `Beginner`
+  - `Intermediate`
+  - `Advanced`
+- `Beginner` and `Intermediate` are already handled by Knovia’s MCQ engine
+- `Advanced` is currently represented in data, but there is no separate external coding-lab integration yet
+- the user already sees a `Validate` action in Knovia
+- `profileId` already exists in Knovia auth and assessment-linked data
+
+### Knovia database and validation reality
+
+From the Knovia scan:
+
+- skill levels are defined in Prisma-backed data models
+- `Advanced` already exists as a legitimate level in Knovia data
+- current assessment/result models in Knovia are oriented around MCQ-style attempt storage
+- external coding-lab attempts should not be forced into the same internal MCQ `Assessment` / `Answer` storage shape
+
+### Knovia frontend reality
+
+The current advanced validation does not yet redirect to CODE-IDE. The existing frontend flow is still shaped around the internal MCQ assessment flow.
+
+The important current Knovia frontend files are:
+
+- `SkillModal/index.tsx`
+  - renders skill/proficiency-level selection behavior
+- `ProfileSkillList/index.tsx`
+  - renders the visible `Validate` button
+  - contains click/label logic that currently does not distinguish external advanced launch strongly enough
+- `SkillManagement/index.tsx`
+  - currently drives the assessment launch decision
+  - today this is the point where MCQ flow is opened
+- `quiz-assessment/page.tsx`
+  - current internal Knovia MCQ assessment page
+- `useSkillAssessment.ts`
+  - hook used by Knovia’s current internal assessment launch flow
+- `skillAssessment.service.ts`
+  - frontend service layer calling Knovia backend assessment launch APIs
+
+### Knovia backend reality
+
+The current Knovia backend already knows how to:
+
+- read `profileId` from auth
+- validate ownership of skill-linked assessment actions
+- create internal assessment attempts
+- store assessment answers/results
+- update validated skill state
+
+The important current Knovia backend files are:
+
+- `assessmentRoute.js`
+  - current backend routes for assessment start/submit behavior
+- `assessmentController.js`
+  - current internal MCQ launch and submit handling
+  - currently treats Advanced as a normal internal level unless explicitly blocked
+- `assessmentService.js`
+  - attempt policy, cooldown, and review rules
+- `authenticate.js`
+  - attaches `req.user.profileId` from JWT
+- `jwtUtils.js`
+  - existing signing helpers and JWT handling patterns
+- `sectionSchemas.js`
+  - request/response payload validation area
+- `makeSectionDirty.js`
+  - update helper relevant when skill state changes after external validation
+
+### Reusable patterns already present in Knovia
+
+Knovia already has examples of:
+
+- signed/tokenized flows
+- webhook/callback style integrations
+- auth-backed user context using `profileId`
+
+Useful examples in Knovia:
+
+- signed mentor feedback links
+- Razorpay webhook signature validation
+- AI parser / scoring callback routes
+
+These patterns mean the CODE-IDE integration should reuse Knovia’s existing backend integration style rather than inventing a completely new mechanism.
+
+### What Knovia does not yet have
+
+Knovia does not yet have:
+
+- a dedicated backend launch endpoint for CODE-IDE advanced assessments
+- a dedicated external-attempt model for coding-lab attempts
+- a signed callback receiver specifically for CODE-IDE results
+- a frontend split where `Advanced` clearly routes outside the MCQ engine
+
+### Practical Knovia interpretation for this integration
+
+The developer should assume:
+
+- Knovia remains the source of truth for skill validation state
+- Knovia issues the SSO launch
+- Knovia owns whether a candidate is allowed another advanced attempt
+- Knovia receives the final external result and decides how to mark the skill
+- CODE-IDE is only the advanced execution engine, not the master profile system
+
+---
+
 ## Default Product Decisions
 
 These are the assumed defaults for implementation unless product explicitly changes them before development starts.
@@ -787,6 +899,24 @@ Change:
 
 Based on the repo scan already performed.
 
+The goal of this section is to let the developer understand the Knovia side without opening the full codebase first.
+
+### Knovia current flow today
+
+Today the Knovia path is effectively:
+
+1. user sees a skill and clicks `Validate`
+2. frontend skill-management flow launches the internal assessment path
+3. the internal Knovia MCQ engine starts using:
+   - `profileSkillId`
+4. Knovia backend:
+   - validates ownership through `profileId`
+   - selects MCQ questions by skill and level
+   - stores attempt state
+5. on completion, Knovia stores answers/results internally and may mark the skill as validated
+
+For `Advanced`, this current behavior must be interrupted and replaced with external CODE-IDE launch behavior.
+
 ### Frontend changes
 
 #### 1. Validate button launch logic
@@ -794,6 +924,11 @@ Based on the repo scan already performed.
 File:
 
 - `ProfileSkillList/index.tsx`
+
+Current role:
+
+- renders the visible skill list and `Validate` action
+- contains the current click path and visible label logic
 
 Change:
 
@@ -805,6 +940,11 @@ Change:
 File:
 
 - `SkillManagement/index.tsx`
+
+Current role:
+
+- decides what assessment flow to open when validation starts
+- today it opens the MCQ-oriented instructions/assessment path
 
 Change:
 
@@ -820,6 +960,10 @@ File:
 
 - `skillAssessment.service.ts`
 
+Current role:
+
+- frontend service wrapper around current assessment launch APIs
+
 Add:
 
 - `launchCodeIdeAssessment(profileSkillId)`
@@ -832,6 +976,10 @@ File:
 
 - `assessmentRoute.js`
 
+Current role:
+
+- current backend assessment route mount for internal assessment actions
+
 Add:
 
 - `POST /code-ide/launch`
@@ -842,6 +990,12 @@ Add:
 File:
 
 - `assessmentController.js`
+
+Current role:
+
+- starts internal MCQ assessment flow
+- validates the request against the user/profile context
+- stores internal assessment progress and result updates
 
 Change:
 
@@ -868,6 +1022,10 @@ File:
 
 - `sectionSchemas.js`
 
+Current role:
+
+- request/response validation schema definitions
+
 Add:
 
 - launch payload schema
@@ -878,6 +1036,10 @@ Add:
 File:
 
 - `jwtUtils.js`
+
+Current role:
+
+- JWT and signed-link helper area already used elsewhere in Knovia
 
 Change:
 
