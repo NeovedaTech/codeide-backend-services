@@ -28,7 +28,7 @@ const encodeBase64 = (str) =>
 const decodeBase64 = (str) =>
   typeof str === "string" ? decodeURIComponent(escape(atob(str))) : "";
 
-export const CODE_EXECUTION_API = "https://execution.velocify.in";
+export const CODE_EXECUTION_API = "https://execution.knovia.ai";
 
 export const headers = {
   "X-Auth-Token": "yourAuthTokenHere",
