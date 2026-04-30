@@ -4,8 +4,8 @@
 
 This document is the execution-ready implementation spec for integrating `knovia.ai` with `CODE-IDE` so that:
 
-- `Beginner` and `Intermediate` skill validation remain in Knovia using the MCQ engine
-- `Advanced` skill validation is launched in `CODE-IDE`
+- most skill validation remains in Knovia using the existing assessment engine
+- only the explicitly approved coding-environment mappings are launched in `CODE-IDE`
 - the student reaches `CODE-IDE` through SSO
 - `CODE-IDE` evaluates the attempt and sends the final result back to Knovia
 
@@ -17,7 +17,7 @@ This document is written to reduce implementation ambiguity. It is intended for 
 
 This spec covers:
 
-- Knovia launch flow for `Advanced` skills
+- Knovia launch flow for selected coding-environment skill mappings
 - CODE-IDE SSO consumption and attempt creation
 - assessment resolution in CODE-IDE
 - callback/result sync from CODE-IDE back to Knovia
@@ -30,6 +30,12 @@ This spec does not cover:
 - UI design changes outside the integration touchpoints
 - long-term analytics/reporting beyond the callback payload
 - advanced retry/queue backoff infrastructure beyond the minimum required callback retry path
+
+Important correction:
+
+- the routing rule is no longer "all Advanced skills go to CODE-IDE"
+- the routing rule is "only approved `(skillId, roleId, level)` mappings go to CODE-IDE"
+- all other validations, including unapproved Advanced validations, must continue to use Knovia's own assessment engine
 
 ---
 
@@ -45,9 +51,11 @@ The points below are the distilled repo-scan findings from Knovia and should be 
   - `Beginner`
   - `Intermediate`
   - `Advanced`
-- `Beginner` and `Intermediate` are already handled by Knovia’s MCQ engine
+- `Beginner` and `Intermediate` are already handled by Knovia's MCQ engine
 - `Advanced` is currently represented in data, but there is no separate external coding-lab integration yet
 - latest scan confirms `Advanced` still goes into the internal MCQ flow unless explicitly branched
+- latest product decision says CODE-IDE routing is not based only on `Advanced`
+- CODE-IDE routing must use an allowlist of selected `(skillId, roleId, level)` combinations
 - the user already sees a `Validate` action in Knovia
 - `profileId` already exists in Knovia auth and assessment-linked data
 
@@ -66,9 +74,33 @@ From the Knovia scan:
 - frontend has some `Expert` references, but backend Prisma/Zod does not support `Expert`
 - until product confirms otherwise, `Expert` must be treated as frontend contract drift and not added to the CODE-IDE integration contract
 
+### Coding-environment eligibility
+
+The coding environment must be launched only for the approved mapping matrix:
+
+- see `KNOVIA_CODEIDE_CODING_ELIGIBILITY_MATRIX.md`
+
+The eligibility check must use:
+
+- `skillId`
+- `roleId`
+- `level`
+
+Do not route based only on:
+
+- skill name
+- skill level
+- whether the level is `Advanced`
+
+Reason:
+
+- the approved matrix includes `Beginner` and `Intermediate` mappings
+- some non-approved skills and levels must remain inside Knovia
+- a language skill by itself is not enough to decide routing
+
 ### Knovia frontend reality
 
-The current advanced validation does not yet redirect to CODE-IDE. The existing frontend flow is still shaped around the internal MCQ assessment flow.
+The current validation flow does not yet route selected coding-environment mappings to CODE-IDE. The existing frontend flow is still shaped around the internal MCQ assessment flow.
 
 The important current Knovia frontend files are:
 
@@ -156,7 +188,7 @@ These patterns mean the CODE-IDE integration should reuse Knovia’s existing ba
 
 Knovia does not yet have:
 
-- a dedicated backend launch endpoint for CODE-IDE advanced assessments
+- a dedicated backend launch endpoint for CODE-IDE eligible assessments
 - a dedicated external-attempt model for coding-lab attempts
 - a signed callback receiver specifically for CODE-IDE results
 - a frontend split where `Advanced` clearly routes outside the MCQ engine
@@ -179,16 +211,20 @@ These are the assumed defaults for implementation unless product explicitly chan
 
 ### Assessment resolution
 
-- one `Advanced` assessment is mapped to one `skillId`
+- one CODE-IDE assessment can be mapped to one or more approved Knovia role-skill-level combinations
 - the resolved CODE-IDE assessment is selected by:
   - `skillId`
-  - `level = advanced`
+  - `roleId`
+  - `level`
+- only approved combinations in `KNOVIA_CODEIDE_CODING_ELIGIBILITY_MATRIX.md` should launch CODE-IDE
+- non-approved combinations must continue inside Knovia's own assessment engine
 
 ### Attempt policy
 
 - one Knovia launch creates one CODE-IDE attempt record
 - reattempts are allowed only if Knovia issues a new launch token and a new `attemptId`
-- Knovia is the source of truth for whether another advanced attempt is permitted
+- Knovia is the source of truth for whether another coding-environment attempt is permitted
+- Knovia is also the source of truth for whether a given role-skill-level combination is coding-lab eligible
 
 ### Verification rule
 
@@ -269,9 +305,11 @@ sequenceDiagram
     participant CodeAPI as CODE-IDE Backend
     participant Worker as CODE-IDE Worker
 
-    Student->>KnoviaFE: Click Validate on Advanced skill
-    KnoviaFE->>KnoviaBE: Request Advanced assessment launch
-    KnoviaBE->>KnoviaBE: Validate user, skill, level
+    Student->>KnoviaFE: Click Validate on skill
+    KnoviaFE->>KnoviaBE: Request validation launch
+    KnoviaBE->>KnoviaBE: Validate profile, skill, role, level
+    KnoviaBE->>KnoviaBE: Check coding eligibility matrix
+    alt eligible for CODE-IDE
     KnoviaBE->>KnoviaBE: Create signed launch JWT
     KnoviaBE-->>KnoviaFE: return redirectUrl
     KnoviaFE->>CodeUI: Open /sso/knovia?token=...
@@ -289,6 +327,9 @@ sequenceDiagram
     KnoviaBE->>KnoviaBE: Verify signature, update validation state
     Worker->>CodeAPI: Mark callback status
     CodeUI-->>Student: Show report / completion page
+    else not eligible for CODE-IDE
+    KnoviaBE-->>KnoviaFE: continue Knovia assessment engine
+    end
 ```
 
 ### Runtime architecture
@@ -296,7 +337,7 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     A[Knovia.ai Frontend] --> B[Knovia.ai Backend]
-    B -->|Signed launch token| C[CODE-IDE Frontend /sso/knovia]
+    B -->|Only eligible mappings get signed token| C[CODE-IDE Frontend /sso/knovia]
     C --> D[CODE-IDE Backend /api/v1/knovia/launch]
     D --> E[(User)]
     D --> F[(Assesment)]
@@ -321,6 +362,7 @@ flowchart LR
 
 - `profileSkillId`
 - `skillId`
+- `roleId`
 - `level`
 - `attemptId`
 
@@ -335,7 +377,7 @@ flowchart LR
 
 ## 0. Knovia frontend to Knovia backend launch API
 
-This is the API called by Knovia frontend when a user clicks `Validate` for an `Advanced` skill.
+This is the API called by Knovia frontend when a user clicks `Validate` for a skill.
 
 Recommended route, matching the current Knovia assessment-service style:
 
@@ -356,7 +398,9 @@ The Knovia backend must:
 - read `profileId` from authenticated `req.user`
 - load the `ProfileSkill`
 - verify that the skill belongs to the authenticated profile
-- verify `ProfileSkill.level === "Advanced"`
+- resolve the associated `roleId`
+- check whether `(skillId, roleId, level)` exists in the approved coding eligibility matrix
+- if not eligible, do not create a CODE-IDE launch token
 - create a `CodeIdeAssessmentAttempt` record
 - create a signed launch token for CODE-IDE
 - return the CODE-IDE redirect URL
@@ -366,6 +410,7 @@ Response:
 ```json
 {
   "success": true,
+  "assessmentEngine": "code-ide",
   "redirectUrl": "https://lab.knovia.ai/sso/knovia?token=<short-lived-jwt>",
   "attemptId": "uuid"
 }
@@ -375,6 +420,7 @@ Important:
 
 - this route must not call `validateAssessment()` unless the business explicitly wants CODE-IDE launches to consume MCQ attempts
 - latest scan says `validateAssessment()` increments MCQ attempt tracking, so CODE-IDE launch should use its own attempt record
+- if the mapping is not eligible for CODE-IDE, the backend should return a clear response that tells the frontend to continue the normal Knovia assessment engine
 
 ## 1. Knovia launch redirect
 
@@ -400,9 +446,11 @@ Knovia frontend should receive:
   "email": "student@example.com",
   "name": "Student Name",
   "profileSkillId": 999,
+  "roleId": 2,
+  "roleName": "Software Engineer - Application Development",
   "skillId": 12,
   "skillName": "JavaScript",
-  "level": "Advanced",
+  "level": "Intermediate",
   "attemptId": "uuid",
   "callbackUrl": "https://api.knovia.ai/api/skillAssessment/code-ide/callback",
   "returnUrl": "https://knovia.ai/my-profile?assessment=code-ide",
@@ -472,18 +520,18 @@ Knovia frontend should receive:
 ```json
 {
   "success": false,
-  "code": "ADVANCED_ASSESSMENT_NOT_FOUND",
-  "message": "No advanced assessment is mapped to this skill."
+  "code": "CODE_IDE_ASSESSMENT_NOT_FOUND",
+  "message": "No CODE-IDE assessment is mapped to this role-skill-level combination."
 }
 ```
 
-#### Level mismatch
+#### Not eligible for CODE-IDE
 
 ```json
 {
   "success": false,
-  "code": "UNSUPPORTED_LEVEL",
-  "message": "Only advanced skill launches are supported through this endpoint."
+  "code": "CODE_IDE_NOT_ELIGIBLE",
+  "message": "This role-skill-level combination should continue in Knovia assessment engine."
 }
 ```
 
@@ -511,8 +559,9 @@ Recommended:
   "codeIdeAttemptId": "solutionId",
   "profileId": 123,
   "profileSkillId": 999,
+  "roleId": 2,
   "skillId": 12,
-  "level": "Advanced",
+  "level": "Intermediate",
   "status": "completed",
   "score": 82,
   "maxScore": 100,
@@ -601,14 +650,13 @@ Add field:
 level: {
   type: String,
   enum: ["beginner", "intermediate", "advanced"],
-  required: true,
-  default: "advanced"
+  required: true
 }
 ```
 
 Rules:
 
-- for this integration, launch resolution uses `skillId + level=advanced`
+- for this integration, launch resolution uses `skillId + roleId + level`
 - SSO-launched attempts must still honor existing operational flags on the resolved assessment
 
 ### Solution model
@@ -633,12 +681,15 @@ profileId: {
 profileSkillId: {
   type: Number,
 },
+roleId: {
+  type: Number,
+},
 skillId: {
   type: Number,
 },
 level: {
   type: String,
-  enum: ["advanced"]
+  enum: ["beginner", "intermediate", "advanced"]
 },
 callbackUrl: {
   type: String,
@@ -670,13 +721,14 @@ Indexes:
 
 ### Optional dedicated mapping model
 
-If `Assesment` does not cleanly map one advanced assessment per skill, add a mapping model:
+If `Assesment` does not cleanly map one coding assessment per role-skill-level combination, add a mapping model:
 
 `SkillAssessmentMapping`
 
 Fields:
 
 - `skillId`
+- `roleId`
 - `level`
 - `assessmentId`
 - `isActive`
@@ -698,6 +750,7 @@ Fields:
 - `attemptId`
 - `profileId`
 - `profileSkillId`
+- `roleId`
 - `skillId`
 - `level`
 - `status`
@@ -717,7 +770,7 @@ Fields:
 
 Purpose:
 
-- stores the lifecycle of advanced external validation
+- stores the lifecycle of external CODE-IDE validation
 - keeps external coding assessment data separate from internal MCQ `Assessment` / `Answer` records
 - enables idempotency by `attemptId`, `codeIdeAttemptId`, and/or `callbackEventId`
 
@@ -803,7 +856,7 @@ Responsibilities:
 - verify Knovia JWT
 - validate issuer/audience/expiry
 - upsert user using `profileId`
-- resolve advanced assessment
+- resolve the CODE-IDE assessment from the approved `(skillId, roleId, level)` mapping
 - create or reuse solution by external attempt id
 - return:
   - local session token
@@ -1013,6 +1066,7 @@ Change:
   - `profileSkillId`
   - `level`
   - `skillId`
+- `roleId` must be available to the backend either through the `ProfileSkill` relation or explicit request context
 - do not treat advanced exactly like MCQ launch
 
 #### 2. Skill management launch branching
@@ -1029,11 +1083,12 @@ Current role:
 
 Change:
 
-- if `skill.level === "Advanced"`:
-  - call new Knovia backend launch endpoint
+- call the Knovia backend launch decision endpoint for validation
+- if backend returns `assessmentEngine = "code-ide"`:
   - redirect browser to returned `redirectUrl`
-- else:
-  - keep existing MCQ flow
+- if backend returns `assessmentEngine = "knovia"`:
+  - keep existing MCQ/assessment flow
+- do not decide CODE-IDE eligibility only in frontend, because the final source of truth must be backend-side mapping data
 
 #### 3. Service layer
 
@@ -1089,8 +1144,11 @@ Current role:
 Change:
 
 - reject Advanced in internal MCQ start flow
-- Advanced must not continue into Knovia MCQ engine
+- CODE-IDE eligible mappings must not continue into Knovia MCQ engine
 - place this check before `validateAssessment()` runs, because latest scan confirms `validateAssessment()` increments MCQ attempt counters
+- update this rule from a hardcoded Advanced-only block to a coding-eligibility block:
+  - if `(skillId, roleId, level)` is CODE-IDE eligible, do not start MCQ
+  - if not eligible, keep the existing Knovia assessment engine
 
 #### 3. New service/controller for external assessment
 
@@ -1180,7 +1238,7 @@ Change:
 
 ## State Model
 
-### External advanced attempt state
+### External CODE-IDE attempt state
 
 ```mermaid
 stateDiagram-v2
@@ -1231,7 +1289,7 @@ For the first implementation, minimum required status is:
 ### Verification fields
 
 - `passed`: whether CODE-IDE scoring threshold is cleared
-- `verified`: whether the advanced validation should count as valid
+- `verified`: whether the CODE-IDE validation should count as valid
 
 Default rule:
 
@@ -1284,7 +1342,7 @@ Required handling before implementation:
 - if `Expert` is not real product scope, remove or normalize frontend `Expert` references
 - if `Expert` is real product scope, update Prisma, backend validation, frontend types, and integration contract together
 - do not silently convert unknown levels to `Beginner`
-- CODE-IDE integration should only accept `Advanced` until the backend contract changes
+- CODE-IDE integration should only accept mappings listed in `KNOVIA_CODEIDE_CODING_ELIGIBILITY_MATRIX.md` until the backend contract changes
 
 ### Silent downgrade risk
 
@@ -1295,8 +1353,34 @@ This must not happen for external validation because it can send the wrong asses
 Rule:
 
 - unknown levels should fail validation visibly
-- `Advanced` should launch CODE-IDE
-- `Beginner` and `Intermediate` should use MCQ
+- approved coding matrix mappings should launch CODE-IDE
+- non-approved mappings should use Knovia's own assessment engine
+
+---
+
+## Coding Eligibility Rule
+
+The final launch decision must be made by Knovia backend using an allowlist.
+
+Eligibility key:
+
+```text
+skillId + roleId + level
+```
+
+If the key exists in `KNOVIA_CODEIDE_CODING_ELIGIBILITY_MATRIX.md`:
+
+- Knovia creates a CODE-IDE launch attempt
+- Knovia signs the CODE-IDE SSO token
+- frontend redirects to `lab.knovia.ai`
+
+If the key does not exist:
+
+- Knovia continues with its own assessment engine
+- no CODE-IDE token is created
+- no CODE-IDE attempt is created
+
+This is required because the approved CODE-IDE scope includes some `Beginner` and `Intermediate` mappings, and not every `Advanced` skill should automatically move to CODE-IDE.
 
 ---
 
@@ -1304,21 +1388,21 @@ Rule:
 
 ## Functional
 
-1. A user clicking `Validate` on `Advanced` skill in Knovia is redirected to CODE-IDE successfully.
+1. A user clicking `Validate` on a CODE-IDE eligible mapping in Knovia is redirected to CODE-IDE successfully.
 2. CODE-IDE does not require manual login for that flow.
 3. CODE-IDE does not require manual role/skill selection for that flow.
-4. CODE-IDE resolves the correct advanced assessment from the incoming skill.
+4. CODE-IDE resolves the correct assessment from the incoming `skillId + roleId + level`.
 5. CODE-IDE creates or reuses the user using `profileId`.
 6. CODE-IDE stores external launch metadata on the attempt.
 7. On completion and evaluation, CODE-IDE sends callback to Knovia.
-8. Knovia receives the callback and updates advanced validation state.
+8. Knovia receives the callback and updates validation state.
 9. Knovia stores report URL and certificate URL.
 
 ## Negative-path
 
 1. Expired launch token is rejected.
 2. Invalid signature launch token is rejected.
-3. Missing advanced assessment mapping is handled safely.
+3. Missing CODE-IDE assessment mapping is handled safely.
 4. Duplicate callback does not create duplicate validation updates.
 5. Callback with mismatched `profileId` / `skillId` / `profileSkillId` is rejected.
 
@@ -1335,10 +1419,10 @@ Rule:
 
 ### Knovia
 
-- Advanced skill launch works
+- approved coding-environment mappings launch CODE-IDE
 - Beginner/Intermediate unchanged
-- Advanced no longer enters internal MCQ path
-- Advanced is rejected from MCQ start before MCQ attempt counters are incremented
+- non-approved mappings continue in Knovia's own assessment engine
+- CODE-IDE eligible mappings are rejected from MCQ start before MCQ attempt counters are incremented
 - Callback updates profile skill status
 - Duplicate callback is ignored safely
 - `Expert` frontend drift is removed, blocked, or formally added to backend before release
@@ -1347,7 +1431,7 @@ Rule:
 
 - launch token verification works
 - user upsert by `profileId` works
-- advanced assessment resolution works
+- role-skill-level assessment resolution works
 - solution creation with external metadata works
 - assessment launch by `solutionId` works
 - evaluator sends callback after result finalization
@@ -1383,12 +1467,12 @@ Rule:
 
 ### Knovia
 
-- [ ] Block Advanced from internal MCQ launch path
+- [ ] Block CODE-IDE eligible mappings from internal MCQ launch path
 - [ ] Add CODE-IDE launch endpoint
 - [ ] Add CODE-IDE callback endpoint
 - [ ] Add signed launch JWT helper
 - [ ] Add external attempt record model
-- [ ] Update frontend Validate flow for Advanced
+- [ ] Update frontend Validate flow for CODE-IDE eligible mappings
 - [ ] Update validation state on successful callback
 
 ### CODE-IDE backend
@@ -1397,7 +1481,7 @@ Rule:
 - [ ] Add launch endpoint
 - [ ] Add Knovia JWT verification service
 - [ ] Add user upsert by `profileId`
-- [ ] Add advanced assessment resolution
+- [ ] Add role-skill-level assessment resolution
 - [ ] Add external metadata to `Solution`
 - [ ] Add callback sender after evaluation
 - [ ] Add callback retry/failure tracking
@@ -1419,12 +1503,12 @@ Rule:
 This integration should be implemented as:
 
 - Knovia = launch issuer and validation owner
-- CODE-IDE = advanced assessment execution engine
+- CODE-IDE = coding-environment assessment execution engine
 
 The most important technical requirements are:
 
 - `profileId` as the shared identity
-- `skillId + advanced` as the assessment resolution rule
+- `skillId + roleId + level` as the assessment resolution rule
 - signed launch token
 - signed idempotent callback
 - external metadata stored on CODE-IDE attempts

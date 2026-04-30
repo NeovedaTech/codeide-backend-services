@@ -1,11 +1,24 @@
-# Knovia.ai to CODE-IDE Advanced Assessment Integration Plan
+# Knovia.ai to CODE-IDE Coding Assessment Integration Plan
+
+## Current Routing Correction
+
+This high-level plan was originally written when the working assumption was that all `Advanced` skill validations would go to CODE-IDE.
+
+That assumption has changed.
+
+The current product rule is:
+
+- only approved `(skillId, roleId, level)` mappings should launch CODE-IDE
+- all other validations should continue in Knovia's own assessment engine
+- the approved list is maintained in `KNOVIA_CODEIDE_CODING_ELIGIBILITY_MATRIX.md`
+- the execution source of truth is `KNOVIA_CODEIDE_INTEGRATION_EXECUTION_SPEC.md`
 
 ## Purpose
 
 This document explains how to integrate `knovia.ai` with `CODE-IDE` so that:
 
-- `Beginner` and `Intermediate` skill assessments remain inside Knovia as MCQ-based assessments
-- `Advanced` skill assessments are launched in `CODE-IDE`
+- most skill assessments remain inside Knovia
+- selected coding-environment mappings are launched in `CODE-IDE`
 - the student reaches `CODE-IDE` through SSO
 - `CODE-IDE` sends the final result back to Knovia
 
@@ -19,16 +32,17 @@ It is based on:
 
 ## Goal
 
-When a student clicks `Validate` for an `Advanced` skill level in Knovia:
+When a student clicks `Validate` for a CODE-IDE eligible mapping in Knovia:
 
-1. Knovia should create a signed launch token
-2. the student should be redirected to `lab.knovia.ai`
-3. CODE-IDE should verify the token
-4. CODE-IDE should create or reuse the local user using `profileId`
-5. CODE-IDE should resolve the correct `advanced` assessment for the skill
-6. CODE-IDE should launch the student directly into the assessment
-7. once the assessment is completed and evaluated, CODE-IDE should call back to Knovia
-8. Knovia should update the skill validation status and store report/certificate links
+1. Knovia should check `(skillId, roleId, level)` against the coding eligibility matrix
+2. if eligible, Knovia should create a signed launch token
+3. the student should be redirected to `lab.knovia.ai`
+4. CODE-IDE should verify the token
+5. CODE-IDE should create or reuse the local user using `profileId`
+6. CODE-IDE should resolve the correct assessment using `skillId + roleId + level`
+7. CODE-IDE should launch the student directly into the assessment
+8. once the assessment is completed and evaluated, CODE-IDE should call back to Knovia
+9. Knovia should update the skill validation status and store report/certificate links
 
 ---
 
@@ -47,9 +61,10 @@ Additional shared fields that should travel with the launch:
 - `name`
 - `email`
 - `profileSkillId`
+- `roleId`
 - `skillId`
 - `skillName`
-- `level = Advanced`
+- `level`
 - `attemptId`
 - `callbackUrl`
 - `returnUrl`
