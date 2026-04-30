@@ -47,6 +47,7 @@ The points below are the distilled repo-scan findings from Knovia and should be 
   - `Advanced`
 - `Beginner` and `Intermediate` are already handled by Knovia’s MCQ engine
 - `Advanced` is currently represented in data, but there is no separate external coding-lab integration yet
+- latest scan confirms `Advanced` still goes into the internal MCQ flow unless explicitly branched
 - the user already sees a `Validate` action in Knovia
 - `profileId` already exists in Knovia auth and assessment-linked data
 
@@ -56,8 +57,14 @@ From the Knovia scan:
 
 - skill levels are defined in Prisma-backed data models
 - `Advanced` already exists as a legitimate level in Knovia data
+- backend-supported levels remain:
+  - `Beginner`
+  - `Intermediate`
+  - `Advanced`
 - current assessment/result models in Knovia are oriented around MCQ-style attempt storage
 - external coding-lab attempts should not be forced into the same internal MCQ `Assessment` / `Answer` storage shape
+- frontend has some `Expert` references, but backend Prisma/Zod does not support `Expert`
+- until product confirms otherwise, `Expert` must be treated as frontend contract drift and not added to the CODE-IDE integration contract
 
 ### Knovia frontend reality
 
@@ -70,9 +77,11 @@ The important current Knovia frontend files are:
 - `ProfileSkillList/index.tsx`
   - renders the visible `Validate` button
   - contains click/label logic that currently does not distinguish external advanced launch strongly enough
+  - latest scan shows the click handler currently passes only `profileSkillId`
 - `SkillManagement/index.tsx`
   - currently drives the assessment launch decision
   - today this is the point where MCQ flow is opened
+  - latest scan confirms this is where `Advanced` must branch to CODE-IDE instead of MCQ
 - `quiz-assessment/page.tsx`
   - current internal Knovia MCQ assessment page
 - `useSkillAssessment.ts`
@@ -97,16 +106,35 @@ The important current Knovia backend files are:
 - `assessmentController.js`
   - current internal MCQ launch and submit handling
   - currently treats Advanced as a normal internal level unless explicitly blocked
+  - latest scan confirms `Advanced` must be rejected before the call to `validateAssessment()`, because `validateAssessment()` increments MCQ attempt counters
 - `assessmentService.js`
   - attempt policy, cooldown, and review rules
+  - contains `validateAssessment()` attempt-tracking behavior
 - `authenticate.js`
   - attaches `req.user.profileId` from JWT
 - `jwtUtils.js`
   - existing signing helpers and JWT handling patterns
 - `sectionSchemas.js`
   - request/response payload validation area
+  - backend schemas still support only `Beginner`, `Intermediate`, and `Advanced`
 - `makeSectionDirty.js`
   - update helper relevant when skill state changes after external validation
+
+### Latest Knovia scan details to preserve
+
+- `schema.prisma` contains `ProfileSkill` with `profileId`, `skillId`, `level`, `validated`, and `attempts`
+- `schema.prisma` contains MCQ `Assessment` storage, but it is not suitable as the only storage for CODE-IDE attempts
+- `ProfileSkillList/index.tsx` renders the visible `Validate` button
+- `ProfileSkillList/index.tsx` currently sends only `profileSkillId` to the parent click handler
+- `SkillManagement/index.tsx` currently opens the MCQ instruction modal and navigates to `/quiz-assessment?skillId=<profileSkillId>`
+- `skillAssessment.service.ts` currently calls `/api/skillAssessment/start?profileSkillId=...`
+- `assessmentController.js` currently loads questions by `skillId` and `level`, so `Advanced` is still accepted by MCQ
+- `assessmentController.js` creates `Assessment` and `Answer` records during MCQ submission
+- `assessmentController.js` updates `ProfileSkill.validated = "VALIDATED"` after a passing MCQ result
+- `authenticate.js` attaches decoded JWT context to `req.user`
+- `jwtUtils.js` includes `profileId` in the JWT
+- `AuthContextProvider.tsx` exposes `profileId` on the frontend auth context
+- Razorpay webhook handling is the safest existing pattern for signed CODE-IDE callback verification because it uses raw body and HMAC verification
 
 ### Reusable patterns already present in Knovia
 
@@ -304,6 +332,49 @@ flowchart LR
 ---
 
 ## API Contracts
+
+## 0. Knovia frontend to Knovia backend launch API
+
+This is the API called by Knovia frontend when a user clicks `Validate` for an `Advanced` skill.
+
+Recommended route, matching the current Knovia assessment-service style:
+
+`GET /api/codeide/launch?profileSkillId=<profileSkillId>`
+
+Alternative if the team standardizes on JSON mutation APIs:
+
+`POST /api/codeide/launch`
+
+```json
+{
+  "profileSkillId": 999
+}
+```
+
+The Knovia backend must:
+
+- read `profileId` from authenticated `req.user`
+- load the `ProfileSkill`
+- verify that the skill belongs to the authenticated profile
+- verify `ProfileSkill.level === "Advanced"`
+- create a `CodeIdeAssessmentAttempt` record
+- create a signed launch token for CODE-IDE
+- return the CODE-IDE redirect URL
+
+Response:
+
+```json
+{
+  "success": true,
+  "redirectUrl": "https://lab.knovia.ai/sso/knovia?token=<short-lived-jwt>",
+  "attemptId": "uuid"
+}
+```
+
+Important:
+
+- this route must not call `validateAssessment()` unless the business explicitly wants CODE-IDE launches to consume MCQ attempts
+- latest scan says `validateAssessment()` increments MCQ attempt tracking, so CODE-IDE launch should use its own attempt record
 
 ## 1. Knovia launch redirect
 
@@ -637,13 +708,18 @@ Fields:
 - `reportUrl`
 - `certificateUrl`
 - `codeIdeAttemptId`
+- `launchTokenJti`
+- `callbackEventId`
 - `callbackReceivedAt`
-- `rawPayload`
+- `callbackPayload`
+- `launchedAt`
+- `completedAt`
 
 Purpose:
 
 - stores the lifecycle of advanced external validation
 - keeps external coding assessment data separate from internal MCQ `Assessment` / `Answer` records
+- enables idempotency by `attemptId`, `codeIdeAttemptId`, and/or `callbackEventId`
 
 ---
 
@@ -929,10 +1005,14 @@ Current role:
 
 - renders the visible skill list and `Validate` action
 - contains the current click path and visible label logic
+- latest scan says the handler currently passes only `profileSkillId`
 
 Change:
 
-- pass enough skill context when user clicks `Validate`
+- update the click contract so `onItemClick` can receive the full skill object or at least:
+  - `profileSkillId`
+  - `level`
+  - `skillId`
 - do not treat advanced exactly like MCQ launch
 
 #### 2. Skill management launch branching
@@ -945,6 +1025,7 @@ Current role:
 
 - decides what assessment flow to open when validation starts
 - today it opens the MCQ-oriented instructions/assessment path
+- latest scan says this file currently opens the MCQ modal and navigates to `/quiz-assessment?skillId=<profileSkillId>`
 
 Change:
 
@@ -963,6 +1044,7 @@ File:
 Current role:
 
 - frontend service wrapper around current assessment launch APIs
+- currently calls `/api/skillAssessment/start?profileSkillId=...`
 
 Add:
 
@@ -982,8 +1064,15 @@ Current role:
 
 Add:
 
-- `POST /code-ide/launch`
-- `POST /code-ide/callback`
+- authenticated launch route:
+  - `GET /api/codeide/launch?profileSkillId=...`
+  - or `POST /api/codeide/launch` if the team prefers body-based mutation routes
+- signed callback route:
+  - `POST /api/codeide/callback`
+
+Mounting note:
+
+- latest scan suggests adding the route near authenticated user routes in `server.js`
 
 #### 2. Controller logic
 
@@ -1001,6 +1090,7 @@ Change:
 
 - reject Advanced in internal MCQ start flow
 - Advanced must not continue into Knovia MCQ engine
+- place this check before `validateAssessment()` runs, because latest scan confirms `validateAssessment()` increments MCQ attempt counters
 
 #### 3. New service/controller for external assessment
 
@@ -1015,6 +1105,7 @@ Responsibilities:
 - create launch attempt record
 - return redirect URL
 - process callback
+- avoid consuming MCQ attempt counters unless explicitly required by product
 
 #### 4. Validation schemas
 
@@ -1030,6 +1121,12 @@ Add:
 
 - launch payload schema
 - callback payload schema
+- keep supported level validation aligned to backend reality:
+  - `Beginner`
+  - `Intermediate`
+  - `Advanced`
+
+Do not add `Expert` unless product confirms it and Prisma/Zod/backend validation are updated together.
 
 #### 5. JWT helper
 
@@ -1065,6 +1162,8 @@ Change:
 - callback must be signed
 - Knovia must verify signature before applying any update
 - callback must be idempotent
+- use `eventId` and/or `codeIdeAttemptId` for idempotency
+- prefer the existing Razorpay-style HMAC verification pattern over weaker callback examples
 
 ### Session security
 
@@ -1168,6 +1267,39 @@ Minimum retry policy:
 
 ---
 
+## Current Known Contract Drift
+
+### `Expert` level drift
+
+Latest Knovia scan found frontend references to `Expert`, but backend Prisma/Zod still supports only:
+
+- `Beginner`
+- `Intermediate`
+- `Advanced`
+
+This is a product/data contract drift.
+
+Required handling before implementation:
+
+- if `Expert` is not real product scope, remove or normalize frontend `Expert` references
+- if `Expert` is real product scope, update Prisma, backend validation, frontend types, and integration contract together
+- do not silently convert unknown levels to `Beginner`
+- CODE-IDE integration should only accept `Advanced` until the backend contract changes
+
+### Silent downgrade risk
+
+Latest scan found one frontend handler can silently convert an unknown level to `Beginner`.
+
+This must not happen for external validation because it can send the wrong assessment path.
+
+Rule:
+
+- unknown levels should fail validation visibly
+- `Advanced` should launch CODE-IDE
+- `Beginner` and `Intermediate` should use MCQ
+
+---
+
 ## Acceptance Criteria
 
 ## Functional
@@ -1206,8 +1338,10 @@ Minimum retry policy:
 - Advanced skill launch works
 - Beginner/Intermediate unchanged
 - Advanced no longer enters internal MCQ path
+- Advanced is rejected from MCQ start before MCQ attempt counters are incremented
 - Callback updates profile skill status
 - Duplicate callback is ignored safely
+- `Expert` frontend drift is removed, blocked, or formally added to backend before release
 
 ### CODE-IDE
 
