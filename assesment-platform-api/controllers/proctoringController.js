@@ -113,18 +113,25 @@ export const completeRecording = async (req, res) => {
   const { solutionId, chunks, screenChunks } = req.body;
   if (!solutionId) return res.status(400).json({ success: false, message: "Missing solutionId" });
 
-  const solution = await findOwnSolution(solutionId, req.user.id, "userId");
+  const solution = await findOwnSolution(solutionId, req.user.id, "userId proctoringData.chunks proctoringData.screenChunks");
   if (!solution) return res.status(404).json({ success: false, message: "Solution not found" });
+
+  // Merge client chunks with existing DB chunks (client wins on conflict by chunkIndex)
+  const mergeChunks = (existing, incoming) => {
+    const map = new Map((existing || []).map((c) => [c.chunkIndex, c]));
+    for (const c of incoming || []) map.set(c.chunkIndex, c);
+    return [...map.values()].sort((a, b) => a.chunkIndex - b.chunkIndex);
+  };
 
   const $set = {
     "proctoringData.recordingEndedAt": new Date(),
     "proctoringData.recordingStatus":  "completed",
-    "proctoringData.chunks":           Array.isArray(chunks) ? chunks : [],
+    "proctoringData.chunks":           mergeChunks(solution.proctoringData?.chunks, chunks),
   };
 
   if (Array.isArray(screenChunks) && screenChunks.length > 0) {
-    $set["proctoringData.screenRecordingStatus"] = "completed";
-    $set["proctoringData.screenChunks"]          = screenChunks;
+    $set["proctoringData.screenRecordingStatus"]  = "completed";
+    $set["proctoringData.screenChunks"]           = mergeChunks(solution.proctoringData?.screenChunks, screenChunks);
     $set["proctoringData.screenRecordingEndedAt"] = new Date();
   }
 
@@ -146,20 +153,25 @@ export const getSession = async (req, res) => {
     lastKnownChunkIndex: pd.lastKnownChunkIndex ?? -1,
     sessionCount: pd.sessionCount ?? 0,
     isEnabled: pd.isEnabled ?? false,
+    screenRecordingStatus: pd.screenRecordingStatus || "not_started",
+    screenLastKnownChunkIndex: pd.screenLastKnownChunkIndex ?? -1,
   });
 };
 
 // ── POST /api/v1/proctoring/relay-chunk ──────────────────────────────────────
-// Called via sendBeacon on page unload — JWT can't go in a header so it is
-// passed as ?t=<token>.  The raw video/webm body is uploaded directly to S3.
+// Called via sendBeacon on page unload.  Auth is resolved from the httpOnly
+// cookie (sent automatically by sendBeacon) or the legacy ?t= query param.
 export const relayChunk = async (req, res) => {
   const { solutionId, assessmentId, chunkIndex, recordingType, t } = req.query;
 
-  if (!solutionId || !assessmentId || chunkIndex == null || !t) {
+  if (!solutionId || !assessmentId || chunkIndex == null) {
     return res.status(400).json({ success: false, message: "Missing required fields" });
   }
 
-  const payload = verifyToken(t);
+  const token = t || req.cookies?.token;
+  if (!token) return res.status(401).json({ success: false, message: "Unauthorized" });
+
+  const payload = verifyToken(token);
   if (!payload) return res.status(401).json({ success: false, message: "Unauthorized" });
 
   const solution = await findOwnSolution(solutionId, payload.id, "userId");
@@ -213,8 +225,8 @@ export const getProctoringData = async (req, res) => {
           const cmd = new GetObjectCommand({ Bucket: config.aws.bucket, Key: chunk.s3Key });
           const url = await getSignedUrl(s3, cmd, { expiresIn: config.aws.getExpiry });
           return { chunkIndex: chunk.chunkIndex, url, expiresIn: config.aws.getExpiry };
-        } catch {
-          return { chunkIndex: chunk.chunkIndex, url: null };
+        } catch (err) {
+          return { chunkIndex: chunk.chunkIndex, url: null, error: err?.message || "S3 lookup failed" };
         }
       }),
     );
@@ -231,7 +243,9 @@ export const getProctoringData = async (req, res) => {
     recordingStatus:      pd.recordingStatus,
     recordingStartedAt:   pd.recordingStartedAt,
     recordingEndedAt:     pd.recordingEndedAt,
-    screenRecordingStatus: pd.screenRecordingStatus,
+    screenRecordingStatus:    pd.screenRecordingStatus,
+    screenRecordingStartedAt: pd.screenRecordingStartedAt,
+    screenRecordingEndedAt:   pd.screenRecordingEndedAt,
     logs:                 pd.logs || [],
     playback,
     screenPlayback,

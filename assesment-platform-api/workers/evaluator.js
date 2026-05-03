@@ -86,6 +86,7 @@ const evaluateCodingSection = async (submission, sectionId , response) => {
                     const totalCount = submissions.length;
                     const passCount = submissions.filter(s => s.status.id === 3).length;
 
+                    console.log(`Received ${totalCount} submissions for question ${questionId}, ${passCount} passed`);
                     // Update the deep copied object
                     sectionResponse[questionId].passed = passCount;
                     sectionResponse[questionId].total = totalCount;

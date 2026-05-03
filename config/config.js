@@ -47,7 +47,7 @@ export const redisConnection = {
     host: process.env.REDIS_HOST || 'localhost',//'localhost',
     port: parseInt(process.env.REDIS_PORT || '6379', 10),
     password: process.env.REDIS_PASSWORD,
-    // db: process.env.NODE_ENV == 'DEV' ? 0 : 1
+    db: process.env.NODE_ENV == 'DEV' ? 5 : 1
 };
 
 
